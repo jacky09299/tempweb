@@ -1,50 +1,33 @@
-name: Deploy Vite to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ main ] # 如果您的主分支叫 master，請把這裡改成 master
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
+      - name: Checkout 🛎️
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js ⚙️
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
+          cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install Dependencies 🔧
         run: npm install
 
-      - name: Build
+      - name: Build 🏗️
         run: npm run build
+        # 這裡會建立 dist 資料夾 (Vite 的預設打包路徑)
 
-      # #新版 GitHub Pages 專用的 artifact 上傳 Action（有效）
-      - name: Upload build output
-        uses: actions/upload-pages-artifact@v2
+      - name: Deploy 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          path: ./dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-
-    steps:
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v2
+          folder: dist # 這是 Vite 打包後生成的資料夾名稱
