@@ -1,0 +1,546 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Play, Pause, SkipForward, SkipBack,
+  Settings, Mic, Edit, ArrowRight,
+  Volume2, CheckCircle, RotateCcw, FileText, Sliders
+} from 'lucide-react';
+
+// --- Constants & Helpers ---
+
+const DEFAULT_SCRIPT = `《彼方》
+角色：列車長、小男孩、中年女子、奶奶
+
+（全燈亮，藍燈一直開啟）
+列車長：前往彼方的列車將於午夜抵達，請要乘車的旅客在月台稍作等待。
+（ 小男孩走在鐵軌上，努力維持平衡的走著。）
+小男孩：妳真的不來試試走鐵軌？
+（小男孩看向神秘小孩，從鐵軌掉下）
+神秘小孩：不想。太危險了。
+小男孩：可以想很多事喔。
+（全燈關）
+小男孩：快來了。（害怕）被列車撞會痛幾秒才會死掉？
+神秘小孩：大概一秒吧？
+小男孩：這件事會被新聞報多久？有多少人會記住？
+神秘小孩：一百。
+小男孩：一百天？一百個人？
+神秘小孩：只有一百秒。
+列車長：小安，要喝咖啡嗎？
+小男孩：不要。我說過不要那樣叫我。(不耐煩)
+`;
+
+const parseScript = (text) => {
+  const lines = text.split('\n').filter(line => line.trim() !== '');
+  const parsed = [];
+  let idCounter = 0;
+
+  lines.forEach((line) => {
+    line = line.trim();
+    if (line.startsWith('#')) return;
+
+    if (/^[（\(].+[）\)]$/.test(line)) {
+      parsed.push({
+        id: idCounter++,
+        type: 'direction',
+        text: line.replace(/[（\(\)）]/g, ''),
+        raw: line
+      });
+      return;
+    }
+
+    const match = line.match(/^(.+?)[:：](.+)$/);
+    if (match) {
+      parsed.push({
+        id: idCounter++,
+        type: 'dialogue',
+        character: match[1].trim(),
+        text: match[2].trim(),
+        raw: line
+      });
+      return;
+    }
+
+    parsed.push({
+      id: idCounter++,
+      type: 'context',
+      text: line,
+      raw: line
+    });
+  });
+
+  return parsed;
+};
+
+const getCharacters = (parsedScript) => {
+  const chars = new Set();
+  parsedScript.forEach(line => {
+    if (line.type === 'dialogue') {
+      chars.add(line.character);
+    }
+  });
+  return Array.from(chars);
+};
+
+// --- Sub-Components ---
+
+// Step 1: Input Screen
+const InputScreen = ({ rawText, setRawText, onNext }) => {
+  return (
+    <div className="flex flex-col h-full p-4 md:p-6 gap-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold text-blue-300 flex items-center gap-2">
+          <FileText size={20} /> 步驟 1: 輸入劇本
+        </h2>
+        <button
+          onClick={() => setRawText(DEFAULT_SCRIPT)}
+          className="text-xs text-slate-400 hover:text-white border border-slate-600 px-2 py-1 rounded"
+        >
+          載入範例
+        </button>
+      </div>
+
+      <div className="flex-1 relative">
+        <textarea
+          className="w-full h-full bg-slate-800 text-slate-100 p-4 rounded-xl border border-slate-700 focus:border-blue-500 outline-none resize-none leading-relaxed text-lg"
+          placeholder="請在此貼上劇本..."
+          value={rawText}
+          onChange={(e) => setRawText(e.target.value)}
+        />
+      </div>
+
+      <button
+        onClick={onNext}
+        disabled={!rawText.trim()}
+        className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 text-white p-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-lg"
+      >
+        下一步：聲音設定 <ArrowRight size={20} />
+      </button>
+    </div>
+  );
+};
+
+// Step 2: Voice Config Screen (Updated Logic)
+const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, availableVoices, onNext, onBack }) => {
+
+  const updateConfig = (char, key, value) => {
+    setVoiceConfig(prev => ({
+      ...prev,
+      [char]: {
+        ...prev[char],
+        [key]: value
+      }
+    }));
+  };
+
+  const previewVoice = (char) => {
+    const config = voiceConfig[char] || { pitch: 1, rate: 1, voiceURI: '' };
+    const synth = window.speechSynthesis;
+    synth.cancel();
+
+    // Find the first line of dialogue for this character
+    const firstLine = scriptData.find(line => line.type === 'dialogue' && line.character === char);
+    const textToSpeak = firstLine ? firstLine.text : `我是${char}，目前劇本中沒有找到我的台詞。`;
+
+    // Clean text (remove parens for preview)
+    const cleanText = textToSpeak.replace(/[\(（].*?[\)）]/g, "");
+
+    const u = new SpeechSynthesisUtterance(cleanText);
+    u.lang = 'zh-TW';
+    u.pitch = config.pitch;
+    u.rate = config.rate;
+
+    if (config.voiceURI) {
+      const voice = availableVoices.find(v => v.voiceURI === config.voiceURI);
+      if (voice) u.voice = voice;
+    }
+
+    synth.speak(u);
+  };
+
+  return (
+    <div className="flex flex-col h-full p-4 md:p-6 gap-4">
+      <div className="flex items-center gap-2 mb-2">
+        <button onClick={onBack} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white">
+          <RotateCcw size={16}/>
+        </button>
+        <h2 className="text-xl font-bold text-purple-300 flex items-center gap-2">
+          <Settings size={20} /> 步驟 2: 角色變聲器
+        </h2>
+      </div>
+
+      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+        {characters.length === 0 ? (
+          <div className="text-center text-slate-500 mt-10">
+            沒有偵測到角色。
+          </div>
+        ) : (
+          characters.map((char) => {
+            const config = voiceConfig[char] || { pitch: 1, rate: 1, voiceURI: '' };
+
+            return (
+              <div key={char} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex flex-col gap-3 shadow-md">
+                <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+                  <span className="font-bold text-lg text-white">{char}</span>
+                  <button
+                    onClick={() => previewVoice(char)}
+                    className="flex items-center gap-1 text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-full transition-colors"
+                  >
+                    <Volume2 size={14} /> 試聽台詞
+                  </button>
+                </div>
+
+                {/* Voice Selection */}
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">基礎語音</label>
+                  <select
+                    className="w-full bg-slate-900 border border-slate-600 text-slate-300 rounded-lg p-2 text-sm outline-none"
+                    value={config.voiceURI || ''}
+                    onChange={(e) => updateConfig(char, 'voiceURI', e.target.value)}
+                  >
+                    <option value="">系統預設</option>
+                    {availableVoices.map(v => (
+                      <option key={v.voiceURI} value={v.voiceURI}>
+                        {v.name} ({v.lang})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Pitch Slider (Expanded Range) */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <label className="text-xs text-slate-400">音調 (Pitch)</label>
+                      <span className="text-xs text-blue-300 font-mono">{config.pitch.toFixed(1)}</span>
+                    </div>
+                    {/* Range increased: 0.1 to 2.0 */}
+                    <input
+                      type="range" min="0.1" max="2.0" step="0.1"
+                      className="w-full accent-blue-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                      value={config.pitch}
+                      onChange={(e) => updateConfig(char, 'pitch', Number(e.target.value))}
+                    />
+                    <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                       <span>極低(男)</span>
+                       <span>極高(童)</span>
+                    </div>
+                  </div>
+
+                  {/* Rate Slider (Expanded Range) */}
+                  <div>
+                    <div className="flex justify-between mb-1">
+                       <label className="text-xs text-slate-400">個別語速</label>
+                       <span className="text-xs text-blue-300 font-mono">{config.rate.toFixed(1)}</span>
+                    </div>
+                    {/* Range increased: 0.5 to 2.0 */}
+                    <input
+                      type="range" min="0.5" max="2.0" step="0.1"
+                      className="w-full accent-green-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                      value={config.rate}
+                      onChange={(e) => updateConfig(char, 'rate', Number(e.target.value))}
+                    />
+                     <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                       <span>慢</span>
+                       <span>快</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      <button
+        onClick={onNext}
+        className="bg-green-600 hover:bg-green-500 text-white p-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all shadow-lg"
+      >
+        開始排練 <Play size={20} fill="currentColor" />
+      </button>
+    </div>
+  );
+};
+
+// Step 3: Player Screen
+const PlayerScreen = ({ scriptData, voiceConfig, availableVoices, characters, onEdit }) => {
+  const [currentLineIndex, setCurrentLineIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [myRole, setMyRole] = useState(null);
+  const [readDirections, setReadDirections] = useState(true);
+  const [userTurnProgress, setUserTurnProgress] = useState(0);
+  const scrollRef = useRef(null);
+  const synth = window.speechSynthesis;
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      const activeEl = scrollRef.current.querySelector(`[data-index="${currentLineIndex}"]`);
+      if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentLineIndex]);
+
+  useEffect(() => {
+    let timeoutId;
+    let progressInterval;
+
+    const playLine = () => {
+      if (!isPlaying || currentLineIndex >= scriptData.length) {
+        setIsPlaying(false);
+        setUserTurnProgress(0);
+        return;
+      }
+
+      const line = scriptData[currentLineIndex];
+      const isMyLine = myRole && line.type === 'dialogue' && line.character === myRole;
+
+      // 1. User Turn (Wait)
+      if (isMyLine) {
+        const charCount = line.text.length;
+        const duration = ((charCount * 280) + 1200) / playbackSpeed;
+
+        let startTime = Date.now();
+        progressInterval = setInterval(() => {
+          const elapsed = Date.now() - startTime;
+          const pct = Math.min((elapsed / duration) * 100, 100);
+          setUserTurnProgress(pct);
+          if (elapsed >= duration) clearInterval(progressInterval);
+        }, 50);
+
+        timeoutId = setTimeout(() => {
+           clearInterval(progressInterval);
+           setUserTurnProgress(0);
+           setCurrentLineIndex(prev => prev + 1);
+        }, duration);
+        return;
+      }
+
+      // 2. AI Turn
+      if (!readDirections && line.type === 'direction') {
+        setCurrentLineIndex(prev => prev + 1);
+        return;
+      }
+
+      const u = new SpeechSynthesisUtterance(line.text);
+      u.lang = 'zh-TW';
+
+      let finalRate = playbackSpeed;
+      let finalPitch = 1.0;
+
+      if (line.type === 'dialogue') {
+        const config = voiceConfig[line.character];
+        if (config) {
+           finalRate = playbackSpeed * config.rate;
+           finalPitch = config.pitch;
+
+           if (config.voiceURI) {
+              const vObj = availableVoices.find(v => v.voiceURI === config.voiceURI);
+              if (vObj) u.voice = vObj;
+           }
+        }
+      } else {
+        finalRate = playbackSpeed * 1.2;
+        u.volume = 0.5;
+        finalPitch = 0.8;
+      }
+
+      u.rate = finalRate;
+      u.pitch = finalPitch;
+      u.text = u.text.replace(/[\(（].*?[\)）]/g, "");
+
+      u.onend = () => {
+         timeoutId = setTimeout(() => setCurrentLineIndex(p => p + 1), 300);
+      };
+      u.onerror = () => setCurrentLineIndex(p => p + 1);
+
+      synth.cancel();
+      synth.speak(u);
+    };
+
+    if (isPlaying) {
+      playLine();
+    } else {
+      synth.cancel();
+      clearTimeout(timeoutId);
+      clearInterval(progressInterval);
+      setUserTurnProgress(0);
+    }
+
+    return () => {
+      synth.cancel();
+      clearTimeout(timeoutId);
+      clearInterval(progressInterval);
+    };
+  }, [isPlaying, currentLineIndex, scriptData, playbackSpeed, myRole, readDirections, voiceConfig, availableVoices]);
+
+  const togglePlay = () => setIsPlaying(!isPlaying);
+
+  return (
+    <div className="flex flex-col h-full bg-slate-900">
+      {/* Header */}
+      <div className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-md z-10">
+        <button onClick={onEdit} className="text-slate-400 hover:text-white flex items-center gap-1 text-sm">
+           <Edit size={16} /> 調整設定
+        </button>
+        <div className="flex items-center gap-2">
+           <select
+              className={`bg-slate-700 text-sm rounded px-2 py-1 outline-none border border-slate-600 ${myRole ? 'text-green-300 border-green-500' : 'text-slate-300'}`}
+              value={myRole || ""}
+              onChange={(e) => setMyRole(e.target.value || null)}
+            >
+              <option value="">我是觀眾</option>
+              {characters.map(c => <option key={c} value={c}>我是: {c}</option>)}
+            </select>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
+        <div className="max-w-3xl mx-auto space-y-6 pb-24">
+           {scriptData.map((line, idx) => {
+             const isActive = idx === currentLineIndex;
+             const isMyLine = line.character === myRole;
+             return (
+               <div
+                 key={line.id}
+                 data-index={idx}
+                 onClick={() => { setIsPlaying(false); setCurrentLineIndex(idx); }}
+                 className={`
+                   relative p-4 rounded-xl cursor-pointer transition-all duration-300
+                   ${isActive ? 'bg-slate-800 border-l-4 border-blue-500 shadow-xl scale-[1.02]' : 'hover:bg-slate-800/50 opacity-60'}
+                   ${isMyLine ? 'bg-green-900/10' : ''}
+                 `}
+               >
+                 {line.type === 'dialogue' ? (
+                   <div>
+                     <span className={`text-xs font-bold uppercase tracking-wider mb-1 block ${isMyLine ? 'text-green-400' : 'text-blue-300'}`}>
+                       {line.character}
+                     </span>
+                     <p className={`text-lg leading-relaxed ${isActive ? 'text-white' : 'text-slate-300'}`}>
+                       {line.text}
+                     </p>
+                     {isActive && isMyLine && isPlaying && (
+                       <div className="mt-2 w-full h-1 bg-slate-700 rounded-full overflow-hidden">
+                          <div className="h-full bg-green-500 transition-all duration-75 ease-linear" style={{ width: `${userTurnProgress}%` }} />
+                       </div>
+                     )}
+                   </div>
+                 ) : line.type === 'direction' ? (
+                    <div className="flex gap-2 text-slate-500 italic text-sm">
+                       <span className="border border-slate-700 px-1 rounded text-xs h-fit mt-0.5">指示</span>
+                       <p>{line.text}</p>
+                    </div>
+                 ) : (
+                    <p className="text-center text-slate-500 text-sm py-2">{line.text}</p>
+                 )}
+               </div>
+             )
+           })}
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="bg-slate-800 border-t border-slate-700 p-4 safe-area-pb">
+        <div className="flex items-center justify-between max-w-lg mx-auto">
+          <button onClick={() => setCurrentLineIndex(i => Math.max(i-1, 0))} className="p-3 hover:bg-slate-700 rounded-full text-slate-300">
+            <SkipBack size={24} />
+          </button>
+          <button
+            onClick={togglePlay}
+            className={`p-4 rounded-full shadow-lg transition-transform active:scale-95 ${isPlaying ? 'bg-red-500' : 'bg-blue-500'} text-white`}
+          >
+            {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-1" />}
+          </button>
+          <button onClick={() => setCurrentLineIndex(i => Math.min(i+1, scriptData.length-1))} className="p-3 hover:bg-slate-700 rounded-full text-slate-300">
+            <SkipForward size={24} />
+          </button>
+        </div>
+        <div className="flex justify-center mt-4 gap-4 text-xs text-slate-400">
+           <button onClick={() => setPlaybackSpeed(s => s===1 ? 1.25 : s===1.25 ? 0.75 : 1)} className="bg-slate-700 px-3 py-1 rounded hover:bg-slate-600">
+             全域速度: {playbackSpeed}x
+           </button>
+           <button onClick={() => setReadDirections(!readDirections)} className={`px-3 py-1 rounded border ${readDirections ? 'bg-blue-900/30 border-blue-500 text-blue-300' : 'border-slate-600'}`}>
+             {readDirections ? '朗讀指示' : '跳過指示'}
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Main App ---
+const App = () => {
+  const [step, setStep] = useState(1);
+  const [rawText, setRawText] = useState("");
+  const [scriptData, setScriptData] = useState([]);
+  const [characters, setCharacters] = useState([]);
+
+  const [voiceConfig, setVoiceConfig] = useState({});
+  const [availableVoices, setAvailableVoices] = useState([]);
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const allVoices = window.speechSynthesis.getVoices();
+      const sorted = allVoices.sort((a, b) => {
+         if (a.lang.includes('zh') && !b.lang.includes('zh')) return -1;
+         if (!a.lang.includes('zh') && b.lang.includes('zh')) return 1;
+         return 0;
+      });
+      setAvailableVoices(sorted);
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }, []);
+
+  const goToConfig = () => {
+    const parsed = parseScript(rawText);
+    setScriptData(parsed);
+    const chars = getCharacters(parsed);
+    setCharacters(chars);
+
+    // Set defaults (only if not already set, to preserve edits when going back)
+    setVoiceConfig(prev => {
+      const newConfig = { ...prev };
+      chars.forEach(char => {
+        if (!newConfig[char]) {
+          newConfig[char] = { voiceURI: '', pitch: 1.0, rate: 1.0 };
+        }
+      });
+      return newConfig;
+    });
+
+    setStep(2);
+  };
+
+  return (
+    <div className="h-screen w-screen bg-slate-900 text-slate-100 font-sans overflow-hidden">
+      {step === 1 && (
+        <InputScreen
+          rawText={rawText}
+          setRawText={setRawText}
+          onNext={goToConfig}
+        />
+      )}
+      {step === 2 && (
+        <ConfigScreen
+          scriptData={scriptData} // Pass script data for preview logic
+          characters={characters}
+          voiceConfig={voiceConfig}
+          setVoiceConfig={setVoiceConfig}
+          availableVoices={availableVoices}
+          onNext={() => setStep(3)}
+          onBack={() => setStep(1)}
+        />
+      )}
+      {step === 3 && (
+        <PlayerScreen
+          scriptData={scriptData}
+          voiceConfig={voiceConfig}
+          availableVoices={availableVoices}
+          characters={characters}
+          onEdit={() => setStep(2)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default App;
