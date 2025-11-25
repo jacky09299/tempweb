@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Play, Pause, SkipForward, SkipBack,
   Settings, Mic, Edit, ArrowRight,
-  Volume2, CheckCircle, RotateCcw, FileText, Sliders
+  Volume2, CheckCircle, RotateCcw, FileText, Sliders, Users, X
 } from 'lucide-react';
 
 // --- Constants & Helpers ---
@@ -118,7 +118,7 @@ const InputScreen = ({ rawText, setRawText, onNext }) => {
   );
 };
 
-// Step 2: Voice Config Screen (Updated Logic)
+// Step 2: Voice Config Screen
 const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, availableVoices, onNext, onBack }) => {
 
   const updateConfig = (char, key, value) => {
@@ -136,11 +136,8 @@ const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, ava
     const synth = window.speechSynthesis;
     synth.cancel();
 
-    // Find the first line of dialogue for this character
     const firstLine = scriptData.find(line => line.type === 'dialogue' && line.character === char);
     const textToSpeak = firstLine ? firstLine.text : `我是${char}，目前劇本中沒有找到我的台詞。`;
-
-    // Clean text (remove parens for preview)
     const cleanText = textToSpeak.replace(/[\(（].*?[\)）]/g, "");
 
     const u = new SpeechSynthesisUtterance(cleanText);
@@ -188,7 +185,6 @@ const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, ava
                   </button>
                 </div>
 
-                {/* Voice Selection */}
                 <div>
                   <label className="text-xs text-slate-400 mb-1 block">基礎語音</label>
                   <select
@@ -205,14 +201,12 @@ const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, ava
                   </select>
                 </div>
 
-                {/* Pitch Slider (Expanded Range) */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <div className="flex justify-between mb-1">
                       <label className="text-xs text-slate-400">音調 (Pitch)</label>
                       <span className="text-xs text-blue-300 font-mono">{config.pitch.toFixed(1)}</span>
                     </div>
-                    {/* Range increased: 0.1 to 2.0 */}
                     <input
                       type="range" min="0.1" max="2.0" step="0.1"
                       className="w-full accent-blue-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
@@ -220,18 +214,16 @@ const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, ava
                       onChange={(e) => updateConfig(char, 'pitch', Number(e.target.value))}
                     />
                     <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                       <span>極低(男)</span>
-                       <span>極高(童)</span>
+                       <span>極低</span>
+                       <span>極高</span>
                     </div>
                   </div>
 
-                  {/* Rate Slider (Expanded Range) */}
                   <div>
                     <div className="flex justify-between mb-1">
                        <label className="text-xs text-slate-400">個別語速</label>
                        <span className="text-xs text-blue-300 font-mono">{config.rate.toFixed(1)}</span>
                     </div>
-                    {/* Range increased: 0.5 to 2.0 */}
                     <input
                       type="range" min="0.5" max="2.0" step="0.1"
                       className="w-full accent-green-500 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
@@ -260,14 +252,53 @@ const ConfigScreen = ({ scriptData, characters, voiceConfig, setVoiceConfig, ava
   );
 };
 
-// Step 3: Player Screen
+// Component: Multi-Role Selector Modal
+const RoleSelector = ({ characters, myRoles, setMyRoles, onClose }) => {
+  const toggleRole = (char) => {
+    if (myRoles.includes(char)) {
+      setMyRoles(myRoles.filter(r => r !== char));
+    } else {
+      setMyRoles([...myRoles, char]);
+    }
+  };
+
+  return (
+    <div className="absolute top-14 right-2 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-4 w-64 z-50">
+      <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-700">
+        <h3 className="font-bold text-white flex items-center gap-2">
+          <Users size={16} /> 誰是由真人飾演？
+        </h3>
+        <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={18} /></button>
+      </div>
+      <div className="space-y-2 max-h-60 overflow-y-auto">
+        {characters.map(char => (
+          <button
+            key={char}
+            onClick={() => toggleRole(char)}
+            className={`w-full flex items-center justify-between p-2 rounded-lg text-sm transition-colors ${myRoles.includes(char) ? 'bg-green-900/50 text-green-300 border border-green-700' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700'}`}
+          >
+            <span>{char}</span>
+            {myRoles.includes(char) && <CheckCircle size={16} />}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 text-xs text-slate-500 text-center">
+        {myRoles.length === 0 ? "目前模式：AI 朗讀所有角色" : `AI 將等待 ${myRoles.length} 位真人玩家`}
+      </div>
+    </div>
+  );
+};
+
+// Step 3: Player Screen (Updated for Multi-Role)
 const PlayerScreen = ({ scriptData, voiceConfig, availableVoices, characters, onEdit }) => {
   const [currentLineIndex, setCurrentLineIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [myRole, setMyRole] = useState(null);
+  const [myRoles, setMyRoles] = useState([]); // Changed to Array
   const [readDirections, setReadDirections] = useState(true);
   const [userTurnProgress, setUserTurnProgress] = useState(0);
+  const [showRoleSelector, setShowRoleSelector] = useState(false);
+
   const scrollRef = useRef(null);
   const synth = window.speechSynthesis;
 
@@ -290,10 +321,11 @@ const PlayerScreen = ({ scriptData, voiceConfig, availableVoices, characters, on
       }
 
       const line = scriptData[currentLineIndex];
-      const isMyLine = myRole && line.type === 'dialogue' && line.character === myRole;
+      // Check if current line belongs to ANY of the selected human roles
+      const isHumanTurn = myRoles.includes(line.character) && line.type === 'dialogue';
 
-      // 1. User Turn (Wait)
-      if (isMyLine) {
+      // 1. Human Turn (Wait / Countdown)
+      if (isHumanTurn) {
         const charCount = line.text.length;
         const duration = ((charCount * 280) + 1200) / playbackSpeed;
 
@@ -369,55 +401,70 @@ const PlayerScreen = ({ scriptData, voiceConfig, availableVoices, characters, on
       clearTimeout(timeoutId);
       clearInterval(progressInterval);
     };
-  }, [isPlaying, currentLineIndex, scriptData, playbackSpeed, myRole, readDirections, voiceConfig, availableVoices]);
+  }, [isPlaying, currentLineIndex, scriptData, playbackSpeed, myRoles, readDirections, voiceConfig, availableVoices]);
 
   const togglePlay = () => setIsPlaying(!isPlaying);
 
   return (
-    <div className="flex flex-col h-full bg-slate-900">
+    <div className="flex flex-col h-full bg-slate-900 relative">
       {/* Header */}
       <div className="p-3 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-md z-10">
         <button onClick={onEdit} className="text-slate-400 hover:text-white flex items-center gap-1 text-sm">
            <Edit size={16} /> 調整設定
         </button>
-        <div className="flex items-center gap-2">
-           <select
-              className={`bg-slate-700 text-sm rounded px-2 py-1 outline-none border border-slate-600 ${myRole ? 'text-green-300 border-green-500' : 'text-slate-300'}`}
-              value={myRole || ""}
-              onChange={(e) => setMyRole(e.target.value || null)}
-            >
-              <option value="">我是觀眾</option>
-              {characters.map(c => <option key={c} value={c}>我是: {c}</option>)}
-            </select>
+
+        {/* Multi-Role Toggle Button */}
+        <div className="relative">
+          <button
+            onClick={() => setShowRoleSelector(!showRoleSelector)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm border transition-colors ${myRoles.length > 0 ? 'bg-green-900/50 border-green-500 text-green-300' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
+          >
+            <Users size={16} />
+            {myRoles.length > 0 ? `${myRoles.length} 位真人` : '觀眾模式'}
+          </button>
+
+          {showRoleSelector && (
+            <RoleSelector
+              characters={characters}
+              myRoles={myRoles}
+              setMyRoles={setMyRoles}
+              onClose={() => setShowRoleSelector(false)}
+            />
+          )}
         </div>
       </div>
 
       {/* Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth" onClick={() => setShowRoleSelector(false)}>
         <div className="max-w-3xl mx-auto space-y-6 pb-24">
            {scriptData.map((line, idx) => {
              const isActive = idx === currentLineIndex;
-             const isMyLine = line.character === myRole;
+             const isHumanTurn = myRoles.includes(line.character);
+
              return (
                <div
                  key={line.id}
                  data-index={idx}
-                 onClick={() => { setIsPlaying(false); setCurrentLineIndex(idx); }}
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   setIsPlaying(false);
+                   setCurrentLineIndex(idx);
+                 }}
                  className={`
                    relative p-4 rounded-xl cursor-pointer transition-all duration-300
                    ${isActive ? 'bg-slate-800 border-l-4 border-blue-500 shadow-xl scale-[1.02]' : 'hover:bg-slate-800/50 opacity-60'}
-                   ${isMyLine ? 'bg-green-900/10' : ''}
+                   ${isHumanTurn ? 'bg-green-900/10' : ''}
                  `}
                >
                  {line.type === 'dialogue' ? (
                    <div>
-                     <span className={`text-xs font-bold uppercase tracking-wider mb-1 block ${isMyLine ? 'text-green-400' : 'text-blue-300'}`}>
+                     <span className={`text-xs font-bold uppercase tracking-wider mb-1 block ${isHumanTurn ? 'text-green-400' : 'text-blue-300'}`}>
                        {line.character}
                      </span>
                      <p className={`text-lg leading-relaxed ${isActive ? 'text-white' : 'text-slate-300'}`}>
                        {line.text}
                      </p>
-                     {isActive && isMyLine && isPlaying && (
+                     {isActive && isHumanTurn && isPlaying && (
                        <div className="mt-2 w-full h-1 bg-slate-700 rounded-full overflow-hidden">
                           <div className="h-full bg-green-500 transition-all duration-75 ease-linear" style={{ width: `${userTurnProgress}%` }} />
                        </div>
@@ -521,7 +568,7 @@ const App = () => {
       )}
       {step === 2 && (
         <ConfigScreen
-          scriptData={scriptData} // Pass script data for preview logic
+          scriptData={scriptData}
           characters={characters}
           voiceConfig={voiceConfig}
           setVoiceConfig={setVoiceConfig}
